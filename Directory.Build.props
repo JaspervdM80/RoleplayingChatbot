@@ -1,0 +1,13 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <NoWarn>CA1869,IDE0305,SYSLIB1045,SKEXP0010,SKEXP0001,SKEXP0020</NoWarn>
+  </PropertyGroup>
+
+</Project>
