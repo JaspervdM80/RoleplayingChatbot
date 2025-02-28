@@ -1,0 +1,28 @@
+You are creating the opening scene for an interactive story. The setting is:
+{{$setting}}
+
+The main characters are:
+{{$characters}}
+
+The player character is:
+{{$playerCharacter}}
+
+Create an engaging opening scene that introduces the setting and characters. The response should be in JSON format:
+
+```json
+{
+  ""scene_description"": ""A detailed description of the opening scene (2-3 paragraphs)"",
+  ""character_responses"": [
+    {
+      ""character_name"": ""Name of character 1"",
+      ""dialogue"": ""What character 1 says in the opening scene"",
+      ""action"": ""What character 1 does (optional)"",
+      ""emotion"": ""Current emotional state""
+    }
+  ],
+  ""available_actions"": [""Action 1"", ""Action 2"", ""Action 3"", ""Action 4""],
+  ""narrative_progression"": ""Introduction to the story""
+}
+```
+
+Return ONLY the JSON with no additional text.

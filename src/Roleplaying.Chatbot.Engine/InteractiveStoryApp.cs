@@ -1,7 +1,9 @@
 ﻿using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
+using Roleplaying.Chatbot.Engine.Helpers;
 using Roleplaying.Chatbot.Engine.Models;
+using Roleplaying.Chatbot.Engine.Repositories;
 using Roleplaying.Chatbot.Engine.Services;
 
 namespace Roleplaying.Chatbot.Engine;
@@ -12,17 +14,20 @@ public class InteractiveStoryApp
 {
     private readonly StoryService _memoryService;
     private readonly Kernel _kernel;
+    private readonly PromptRepository _promptRepository;
     private readonly ILogger<InteractiveStoryApp> _logger;
     private readonly StoryConfig _storyConfig;
 
     public InteractiveStoryApp(
         StoryService memoryService,
         Kernel kernel,
+        PromptRepository promptRepository,
         ILogger<InteractiveStoryApp> logger,
         StoryConfig storyConfig)
     {
         _memoryService = memoryService;
         _kernel = kernel;
+        _promptRepository = promptRepository;
         _logger = logger;
         _storyConfig = storyConfig;
     }
@@ -77,35 +82,7 @@ public class InteractiveStoryApp
     private async Task<string> CreateInitialSceneAsync()
     {
         // Create a prompt for the initial scene
-        var initialPrompt = @"
-You are creating the opening scene for an interactive story. The setting is:
-{{$setting}}
-
-The main characters are:
-{{$characters}}
-
-The player character is:
-{{$playerCharacter}}
-
-Create an engaging opening scene that introduces the setting and characters. The response should be in JSON format:
-
-```json
-{
-  ""scene_description"": ""A detailed description of the opening scene (2-3 paragraphs)"",
-  ""character_responses"": [
-    {
-      ""character_name"": ""Name of character 1"",
-      ""dialogue"": ""What character 1 says in the opening scene"",
-      ""action"": ""What character 1 does (optional)"",
-      ""emotion"": ""Current emotional state""
-    }
-  ],
-  ""available_actions"": [""Action 1"", ""Action 2"", ""Action 3"", ""Action 4""],
-  ""narrative_progression"": ""Introduction to the story""
-}
-```
-
-Return ONLY the JSON with no additional text.";
+        var initialPrompt = _promptRepository.Get("initial");
 
         // Create character descriptions
         var characterDescriptions = string.Join("\n", _storyConfig.Characters
@@ -148,8 +125,10 @@ Return ONLY the JSON with no additional text.";
                 await _memoryService.StoreInteractionAsync("Begin the story", responseJson);
             }
 
+            var aiResponse = ResponseHelper.CleanJsonResponse(responseJson);
+
             // Parse the JSON
-            var response = JsonSerializer.Deserialize<JsonElement>(responseJson);
+            var response = JsonSerializer.Deserialize<JsonElement>(aiResponse);
 
             // Extract and display scene description
             string sceneDescription = "";

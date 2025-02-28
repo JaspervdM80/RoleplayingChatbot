@@ -4,6 +4,7 @@ using Microsoft.Extensions.VectorData;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Connectors.Qdrant;
 using Microsoft.SemanticKernel.Embeddings;
+using Roleplaying.Chatbot.Engine.Helpers;
 using Roleplaying.Chatbot.Engine.Models;
 using Roleplaying.Chatbot.Engine.Repositories;
 
@@ -77,11 +78,13 @@ public class StoryService
             // Parse the story response JSON
             var options = new JsonSerializerOptions
             {
-                PropertyNameCaseInsensitive = true
+                PropertyNameCaseInsensitive = true,
             };
 
+            var storyResponse = ResponseHelper.CleanJsonResponse(storyResponseJson);
+
             // Attempt to parse the JSON structure to extract structured data
-            JsonElement jsonResponse = JsonSerializer.Deserialize<JsonElement>(storyResponseJson);
+            var jsonResponse = JsonSerializer.Deserialize<JsonElement>(storyResponse, options);
 
             // Create a new memory instance
             var memory = new StoryMemory

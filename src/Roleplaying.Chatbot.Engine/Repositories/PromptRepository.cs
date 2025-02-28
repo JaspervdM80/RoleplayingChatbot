@@ -9,17 +9,19 @@ public class PromptRepository
         _prompts = [];
     }
 
-    public async Task LoadAsync()
+    public PromptRepository Load()
     {
         var directory = new DirectoryInfo("./Prompts");
 
         foreach (var file in directory.GetFiles("*.txt"))
         {
             var filename = Path.GetFileNameWithoutExtension(file.Name);
-            var prompt = await File.ReadAllTextAsync(file.FullName);
+            var prompt = File.ReadAllText(file.FullName);
 
             Add(filename, prompt);
         }
+
+        return this;
     }
 
     public void Add(string key, string prompt)

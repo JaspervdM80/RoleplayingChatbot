@@ -26,6 +26,8 @@ Background: {{player.background}}
 {{player_action}}
 
 Based on the above information, generate a realistic, immersive response that shows how each character would react to the player's action. Characters should stay true to their personalities and the established story. Return your response as a JSON object with the following structure:
+
+```json
 {
   ""scene_description"": ""A detailed description of what happens in this scene (1-2 paragraphs)"",
   ""character_responses"": [
@@ -45,5 +47,6 @@ Based on the above information, generate a realistic, immersive response that sh
   ""available_actions"": [""Action 1"", ""Action 2"", ""Action 3"", ""Action 4""],
   ""narrative_progression"": ""Brief description of how the story has progressed""
 }
+```
 
 Return ONLY the JSON with no additional text.

@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.Embeddings;
 using Roleplaying.Chatbot.Engine;
 using Roleplaying.Chatbot.Engine.Extensions;
 using Roleplaying.Chatbot.Engine.Models;
@@ -42,16 +41,15 @@ var host = Host.CreateDefaultBuilder(args)
         // Create and register story config
         services.AddSingleton(CreateStoryConfig());
 
+        services.AddSingleton(new PromptRepository().Load());
+
         // Register story memory service
         services.AddSingleton<StoryService>();
 
         // Register interactive story app
         services.AddSingleton<InteractiveStoryApp>();
 
-        var prompts = new PromptRepository();
-        await prompts.LoadAsync();
-
-        services.AddSingleton(prompts);
+        services.AddSingleton(new object());
     })
     .Build();
 
