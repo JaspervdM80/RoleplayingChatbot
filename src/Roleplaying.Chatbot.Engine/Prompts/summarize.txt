@@ -1,0 +1,12 @@
+Create a concise summary (2-3 sentences) of the following story event:
+
+PLAYER ACTION:
+{{$playerAction}}
+
+SCENE DESCRIPTION:
+{{$sceneDescription}}
+
+CHARACTER RESPONSES:
+{{$characterResponses}}
+
+SUMMARY:

@@ -5,6 +5,7 @@ using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Connectors.Qdrant;
 using Microsoft.SemanticKernel.Embeddings;
 using Roleplaying.Chatbot.Engine.Models;
+using Roleplaying.Chatbot.Engine.Repositories;
 
 namespace Roleplaying.Chatbot.Engine.Services;
 
@@ -18,24 +19,25 @@ public class StoryService
     private readonly IVectorStoreRecordCollection<ulong, StoryMemory> _collection;
     private readonly ITextEmbeddingGenerationService _embeddingService;
     private readonly StoryConfig _storyConfig;
+    private readonly PromptRepository _promptRepository;
     private readonly ILogger<StoryService> _logger;
 
     // Vector dimension count from the embedding model
-    private const int EmbeddingDimensions = 1536; // Change based on your model
+    private const int EmbeddingDimensions = 768; // Change based on your model
 
     /// <summary>
     /// Constructor initializes with required dependencies
     /// </summary>
     public StoryService(
         Kernel kernel,
-        ITextEmbeddingGenerationService embeddingService,
-        QdrantVectorStore vectorStore,
         StoryConfig storyConfig,
+        PromptRepository promptRepository,
         ILogger<StoryService> logger)
     {
         _kernel = kernel;
-        _embeddingService = embeddingService;
+        _embeddingService = _kernel.GetRequiredService<ITextEmbeddingGenerationService>();
         _storyConfig = storyConfig;
+        _promptRepository = promptRepository;
         _logger = logger;
 
         // Define vector store schema
@@ -45,16 +47,18 @@ public class StoryService
                 new VectorStoreRecordKeyProperty("Key", typeof(ulong)),
                 new VectorStoreRecordDataProperty("MemoryType", typeof(string)) { IsFilterable = true },
                 new VectorStoreRecordDataProperty("Content", typeof(string)) { IsFullTextSearchable = true },
-                new VectorStoreRecordDataProperty("Timestamp", typeof(long)) { IsFilterable = true, IsSortable = true },
+                new VectorStoreRecordDataProperty("Timestamp", typeof(long)) { IsFilterable = true },
                 new VectorStoreRecordDataProperty("CharactersInvolved", typeof(List<string>)) { IsFilterable = true },
                 new VectorStoreRecordDataProperty("LocationsInvolved", typeof(List<string>)) { IsFilterable = true },
                 new VectorStoreRecordDataProperty("PlotElements", typeof(List<string>)) { IsFilterable = true },
                 new VectorStoreRecordVectorProperty("ContentEmbedding", typeof(ReadOnlyMemory<float>)) { Dimensions = EmbeddingDimensions },
-                new VectorStoreRecordDataProperty("EmotionalValence", typeof(float)) { IsFilterable = true, IsSortable = true },
-                new VectorStoreRecordDataProperty("Importance", typeof(float)) { IsFilterable = true, IsSortable = true },
+                new VectorStoreRecordDataProperty("EmotionalValence", typeof(float)) { IsFilterable = true },
+                new VectorStoreRecordDataProperty("Importance", typeof(float)) { IsFilterable = true },
                 new VectorStoreRecordDataProperty("Summary", typeof(string)) { IsFullTextSearchable = true },
             ]
         };
+
+        var vectorStore = (kernel.GetRequiredService<IVectorStore>() as QdrantVectorStore)!;
 
         // Get collection with the defined schema
         _collection = vectorStore.GetCollection<ulong, StoryMemory>("StoryMemories", memoryDefinition);
@@ -185,8 +189,11 @@ public class StoryService
                     {
                         var relationshipChange = new RelationshipChange();
 
+                        // Fix: Initialize between variable before use
+                        JsonElement between = default;
+
                         if (change.TryGetProperty("character1", out var character1) ||
-                            (change.TryGetProperty("between", out var between) &&
+                            (change.TryGetProperty("between", out between) &&
                              between.ValueKind == JsonValueKind.Array &&
                              between.GetArrayLength() > 0))
                         {
@@ -196,7 +203,7 @@ public class StoryService
                         }
 
                         if (change.TryGetProperty("character2", out var character2) ||
-                            (change.TryGetProperty("between", out between) &&
+                            (between.ValueKind != JsonValueKind.Undefined &&
                              between.ValueKind == JsonValueKind.Array &&
                              between.GetArrayLength() > 1))
                         {
@@ -303,38 +310,40 @@ public class StoryService
             // Generate embedding for the query
             var queryEmbedding = await _embeddingService.GenerateEmbeddingAsync(query);
 
-            // Build filter if needed
-            QdrantFilter? filter = null;
+            // Build filter expression
+            VectorSearchFilter? filters = null;
 
-            if (characterFilter != null && characterFilter.Count > 0 || !string.IsNullOrEmpty(locationFilter))
+            if ((characterFilter != null && characterFilter.Count > 0) || !string.IsNullOrEmpty(locationFilter))
             {
-                filter = new QdrantFilter();
+                filters = new VectorSearchFilter();
 
                 // Add character filter if provided
                 if (characterFilter != null && characterFilter.Count > 0)
                 {
-                    foreach (var character in characterFilter)
-                    {
-                        filter.WithShould(new QdrantFieldCondition("CharactersInvolved", QdrantFieldConditionOperator.Match, character));
-                    }
+                    filters.EqualTo(nameof(StoryMemory.CharactersInvolved), characterFilter);
                 }
 
                 // Add location filter if provided
                 if (!string.IsNullOrEmpty(locationFilter))
                 {
-                    filter.WithShould(new QdrantFieldCondition("LocationsInvolved", QdrantFieldConditionOperator.Match, locationFilter));
+                    filters.EqualTo(nameof(StoryMemory.LocationsInvolved), locationFilter);
                 }
             }
 
             // Perform the vector search
-            var searchResults = await _collection.VectorizedSearchAsync(
-                queryEmbedding,
-                limit: limit,
-                withVector: false,
-                filter: filter);
+            var searchOptions = new VectorSearchOptions
+            {
+                IncludeVectors = false,
+                Top = limit,
+                Filter = filters
+            };
 
-            // Convert results to list
-            return searchResults.Select(r => r.Record).ToList();
+            // Use the VectorizedSearchAsync method and access results properly
+            var searchResponse = await _collection.VectorizedSearchAsync(queryEmbedding, searchOptions);
+            var searchResults = await searchResponse.Results.ToListAsync();
+
+            // Extract and return the records from the results
+            return searchResults.Select(result => result.Record).ToList();
         }
         catch (Exception ex)
         {
@@ -346,7 +355,7 @@ public class StoryService
     /// <summary>
     /// Formats retrieved memories for inclusion in the prompt
     /// </summary>
-    public string FormatMemoriesForPrompt(List<StoryMemory> memories)
+    public static string FormatMemoriesForPrompt(List<StoryMemory> memories)
     {
         var builder = new System.Text.StringBuilder();
 
@@ -400,10 +409,26 @@ public class StoryService
         var playerCharacter = _storyConfig.Characters.FirstOrDefault(c => c.IsPlayerCharacter);
 
         // Get recent history (last 3 interactions)
-        var recentMemories = (await _collection.SearchAsync(
-            limit: 3,
-            sortOptions: new SortOptions { { "Timestamp", SortOrder.Descending } }
-        )).Select(r => r.Record).OrderBy(m => m.Timestamp).ToList();
+        // Search for all memories, sort by timestamp, and take the 3 most recent
+        var memorySearchOptions = new VectorSearchOptions
+        {
+            Top = 100, // Get enough records to sort through
+            IncludeVectors = false
+        };
+
+        // Use a dummy vector for search when we just want to filter/sort
+        var dummyVector = new ReadOnlyMemory<float>(new float[384]);
+
+        // Get all memories
+        var allMemoriesResponse = await _collection.VectorizedSearchAsync(dummyVector, memorySearchOptions);
+
+        // Sort and take most recent 3 memories
+        var recentMemories = await allMemoriesResponse.Results
+            .Select(r => r.Record)
+            .OrderByDescending(m => m.Timestamp)
+            .Take(3)
+            .OrderBy(m => m.Timestamp)
+            .ToListAsync();
 
         // Format recent history
         var recentHistory = string.Join("\n\n", recentMemories.Select(m =>
@@ -448,9 +473,9 @@ public class StoryService
     /// <summary>
     /// Calculate importance score based on story content
     /// </summary>
-    private float CalculateImportance(StoryMemory memory)
+    private static float CalculateImportance(StoryMemory memory)
     {
-        float score = 0.5f; // Default medium importance
+        var score = 0.5f; // Default medium importance
 
         // More important if multiple characters are involved
         score += Math.Min(memory.CharactersInvolved.Count * 0.1f, 0.3f);
@@ -472,19 +497,7 @@ public class StoryService
     {
         try
         {
-            var summarizationPrompt = @"
-Create a concise summary (2-3 sentences) of the following story event:
-
-PLAYER ACTION:
-{{$playerAction}}
-
-SCENE DESCRIPTION:
-{{$sceneDescription}}
-
-CHARACTER RESPONSES:
-{{$characterResponses}}
-
-SUMMARY:";
+            var summarizationPrompt = _promptRepository.Get("summarize");
 
             // Execute the prompt
             var summarizationFunction = _kernel.CreateFunctionFromPrompt(summarizationPrompt);
@@ -514,58 +527,7 @@ SUMMARY:";
     // Template getters
     private string GetBasicTemplate()
     {
-        return @"You are managing an interactive story with multiple characters. Generate responses based on the following information.
-
-## STORY SETTING
-{{story_setting}}
-
-## CHARACTERS
-{{#each characters}}
-* {{name}}: {{personality}}
-{{/each}}
-
-## PLAYER CHARACTER
-Name: {{player.name}}
-Controlled by: Human player
-Background: {{player.background}}
-
-## STORY CONTEXT
-{{story_context}}
-
-## RECENT HISTORY (Last 3 interactions)
-{{recent_history}}
-
-## CURRENT LOCATION
-{{current_location}}
-
-## PLAYER'S LAST ACTION
-{{player_action}}
-
-Based on the above information, generate a realistic, immersive response that shows how each character would react to the player's action. Characters should stay true to their personalities and the established story. Return your response as a JSON object with the following structure:
-
-```json
-{
-  ""scene_description"": ""A detailed description of what happens in this scene (1-2 paragraphs)"",
-  ""character_responses"": [
-    {
-      ""character_name"": ""Name of character 1"",
-      ""dialogue"": ""What character 1 says in response to the player's action"",
-      ""action"": ""What character 1 does (optional)"",
-      ""emotion"": ""Current emotional state""
-    },
-    {
-      ""character_name"": ""Name of character 2"",
-      ""dialogue"": ""What character 2 says in response to the player's action"",
-      ""action"": ""What character 2 does (optional)"",
-      ""emotion"": ""Current emotional state""
-    }
-  ],
-  ""available_actions"": [""Action 1"", ""Action 2"", ""Action 3"", ""Action 4""],
-  ""narrative_progression"": ""Brief description of how the story has progressed""
-}
-```
-
-Return ONLY the JSON with no additional text.";
+        return _promptRepository.Get("default");
     }
 
     private string GetAdvancedTemplate()

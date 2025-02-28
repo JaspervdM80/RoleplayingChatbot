@@ -1,16 +1,16 @@
-﻿using Roleplaying.Chatbot.Engine.Models;
-using Roleplaying.Chatbot.Engine;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.SemanticKernel;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.VectorData;
 using Microsoft.SemanticKernel.Embeddings;
-using Microsoft.SemanticKernel.Connectors.Qdrant;
+using Roleplaying.Chatbot.Engine;
+using Roleplaying.Chatbot.Engine.Extensions;
+using Roleplaying.Chatbot.Engine.Models;
+using Roleplaying.Chatbot.Engine.Repositories;
 using Roleplaying.Chatbot.Engine.Services;
 
 // Configure host with DI
 var host = Host.CreateDefaultBuilder(args)
-    .ConfigureServices((context, services) =>
+    .ConfigureServices(async (context, services) =>
     {
         // Configure kernel
         var kernelBuilder = Kernel.CreateBuilder();
@@ -18,30 +18,26 @@ var host = Host.CreateDefaultBuilder(args)
         // Configure your LLM service here
         kernelBuilder.AddOpenAIChatCompletion(
             modelId: "phi3", // Use your preferred model
-            apiKey: Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? "YOUR_API_KEY");
+            openAIClient: new OpenAI.OpenAIClient(new System.ClientModel.ApiKeyCredential("no-key"), new OpenAI.OpenAIClientOptions() { Endpoint = new Uri("http://localhost:11434/v1") })
+            );
 
         // Configure embedding service - use an appropriate embedding model
-        kernelBuilder.AddOpenAITextEmbeddingGeneration(
-            modelId: "BAAI/bge-small-en-v1.5",
-            apiKey: Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? "YOUR_API_KEY",
-            dimensions: 8080);
+        kernelBuilder.AddOllamaTextEmbeddingGeneration(
+            modelId: "nomic-embed-text",
+            dimensions: 768
+            );
 
         // Configure Qdrant
         kernelBuilder.AddQdrantVectorStore(
             host: "localhost",
             port: 6334,
-            https: false);
+            https: false
+            );
+
+        var kernel = kernelBuilder.Build();
 
         // Add kernel to DI
-        services.AddSingleton(kernelBuilder.Build());
-
-        // Add embedding service to DI
-        services.AddSingleton(sp =>
-            sp.GetRequiredService<Kernel>().GetRequiredService<ITextEmbeddingGenerationService>());
-
-        // Add Qdrant vector store to DI
-        services.AddSingleton(sp =>
-            sp.GetRequiredService<Kernel>().GetRequiredService<IVectorStore>() as QdrantVectorStore);
+        services.AddSingleton(kernel);
 
         // Create and register story config
         services.AddSingleton(CreateStoryConfig());
@@ -51,6 +47,11 @@ var host = Host.CreateDefaultBuilder(args)
 
         // Register interactive story app
         services.AddSingleton<InteractiveStoryApp>();
+
+        var prompts = new PromptRepository();
+        await prompts.LoadAsync();
+
+        services.AddSingleton(prompts);
     })
     .Build();
 
