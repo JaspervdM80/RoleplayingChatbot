@@ -131,7 +131,7 @@ public class InteractiveStoryApp
             var response = JsonSerializer.Deserialize<JsonElement>(aiResponse);
 
             // Extract and display scene description
-            string sceneDescription = "";
+            var sceneDescription = "";
             if (response.TryGetProperty("scene_description", out var sceneDescProperty))
             {
                 sceneDescription = sceneDescProperty.GetString() ?? "";
@@ -153,9 +153,9 @@ public class InteractiveStoryApp
             {
                 foreach (var charResponse in characterResponses.EnumerateArray())
                 {
-                    string characterName = "";
-                    string dialogue = "";
-                    string action = "";
+                    var characterName = "";
+                    var dialogue = "";
+                    var action = "";
 
                     if (charResponse.TryGetProperty("character_name", out var name) ||
                         charResponse.TryGetProperty("character", out name))
@@ -198,7 +198,7 @@ public class InteractiveStoryApp
                 availableActions.ValueKind == JsonValueKind.Array)
             {
                 Console.WriteLine("\nSuggested actions:");
-                int i = 1;
+                var i = 1;
                 foreach (var action in availableActions.EnumerateArray())
                 {
                     if (action.ValueKind == JsonValueKind.String)
@@ -213,7 +213,7 @@ public class InteractiveStoryApp
                      availableActions.ValueKind == JsonValueKind.Array)
             {
                 Console.WriteLine("\nSuggested actions:");
-                int i = 1;
+                var i = 1;
                 foreach (var action in availableActions.EnumerateArray())
                 {
                     if (action.ValueKind == JsonValueKind.String)

@@ -9,7 +9,7 @@ using Roleplaying.Chatbot.Engine.Services;
 
 // Configure host with DI
 var host = Host.CreateDefaultBuilder(args)
-    .ConfigureServices(async (context, services) =>
+    .ConfigureServices((context, services) =>
     {
         // Configure kernel
         var kernelBuilder = Kernel.CreateBuilder();
@@ -48,8 +48,6 @@ var host = Host.CreateDefaultBuilder(args)
 
         // Register interactive story app
         services.AddSingleton<InteractiveStoryApp>();
-
-        services.AddSingleton(new object());
     })
     .Build();
 

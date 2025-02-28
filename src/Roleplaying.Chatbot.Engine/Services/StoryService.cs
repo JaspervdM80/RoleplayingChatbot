@@ -71,7 +71,7 @@ public class StoryService
     /// <summary>
     /// Stores a player action and the resulting story response
     /// </summary>
-    public async Task<ulong> StoreInteractionAsync(string playerAction, string storyResponseJson)
+    public async Task StoreInteractionAsync(string playerAction, string storyResponseJson)
     {
         try
         {
@@ -86,211 +86,7 @@ public class StoryService
             // Attempt to parse the JSON structure to extract structured data
             var jsonResponse = JsonSerializer.Deserialize<JsonElement>(storyResponse, options);
 
-            // Create a new memory instance
-            var memory = new StoryMemory
-            {
-                Key = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                MemoryType = "story_interaction",
-                Content = storyResponseJson,
-                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-            };
-
-            // Extract core information based on the JSON structure
-            var interaction = new StoryInteraction
-            {
-                PlayerAction = playerAction
-            };
-
-            // Extract relevant information from the JSON response
-            // Note: This uses a try/catch approach to handle different JSON structures
-            try
-            {
-                // Try to extract scene description
-                if (jsonResponse.TryGetProperty("scene_description", out var sceneDescription))
-                {
-                    interaction.SceneDescription = sceneDescription.GetString() ?? "";
-                }
-                else if (jsonResponse.TryGetProperty("scene", out var scene) &&
-                         scene.TryGetProperty("description", out var sceneDesc))
-                {
-                    interaction.SceneDescription = sceneDesc.GetString() ?? "";
-                }
-                else if (jsonResponse.TryGetProperty("narrative_response", out var narrativeResponse) &&
-                         narrativeResponse.TryGetProperty("scene_description", out var narrativeSceneDesc))
-                {
-                    interaction.SceneDescription = narrativeSceneDesc.GetString() ?? "";
-                }
-
-                // Try to extract character responses
-                if (jsonResponse.TryGetProperty("character_responses", out var characterResponses) &&
-                    characterResponses.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var response in characterResponses.EnumerateArray())
-                    {
-                        var characterResponse = new CharacterResponse();
-
-                        if (response.TryGetProperty("character_name", out var characterName) ||
-                            response.TryGetProperty("character", out characterName))
-                        {
-                            characterResponse.CharacterName = characterName.GetString() ?? "";
-                        }
-
-                        if (response.TryGetProperty("dialogue", out var dialogue))
-                        {
-                            characterResponse.Dialogue = dialogue.GetString() ?? "";
-                        }
-
-                        if (response.TryGetProperty("action", out var action) ||
-                            response.TryGetProperty("actions", out action))
-                        {
-                            characterResponse.Action = action.GetString() ?? "";
-                        }
-
-                        if (response.TryGetProperty("emotion", out var emotion) ||
-                            response.TryGetProperty("emotional_state", out emotion))
-                        {
-                            characterResponse.Emotion = emotion.GetString() ?? "";
-                        }
-
-                        if (response.TryGetProperty("internal_thoughts", out var internalThoughts))
-                        {
-                            characterResponse.InternalThoughts = internalThoughts.GetString() ?? "";
-                        }
-
-                        interaction.CharacterResponses.Add(characterResponse);
-
-                        // Add to characters involved list
-                        if (!string.IsNullOrEmpty(characterResponse.CharacterName) &&
-                            !memory.CharactersInvolved.Contains(characterResponse.CharacterName))
-                        {
-                            memory.CharactersInvolved.Add(characterResponse.CharacterName);
-                        }
-                    }
-                }
-
-                // Try to extract location
-                if (jsonResponse.TryGetProperty("current_location", out var location))
-                {
-                    interaction.Location = location.GetString() ?? "";
-                    if (!string.IsNullOrEmpty(interaction.Location))
-                    {
-                        memory.LocationsInvolved.Add(interaction.Location);
-                    }
-                }
-
-                // Try to extract narrative progression
-                if (jsonResponse.TryGetProperty("narrative_progression", out var narrativeProgression))
-                {
-                    interaction.NarrativeProgression = narrativeProgression.GetString() ?? "";
-                }
-
-                // Try to extract relationship changes
-                if (jsonResponse.TryGetProperty("relationship_changes", out var relationshipChanges) &&
-                    relationshipChanges.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var change in relationshipChanges.EnumerateArray())
-                    {
-                        var relationshipChange = new RelationshipChange();
-
-                        // Fix: Initialize between variable before use
-                        JsonElement between = default;
-
-                        if (change.TryGetProperty("character1", out var character1) ||
-                            (change.TryGetProperty("between", out between) &&
-                             between.ValueKind == JsonValueKind.Array &&
-                             between.GetArrayLength() > 0))
-                        {
-                            relationshipChange.Character1 = character1.ValueKind != JsonValueKind.Undefined ?
-                                character1.GetString() ?? "" :
-                                between[0].GetString() ?? "";
-                        }
-
-                        if (change.TryGetProperty("character2", out var character2) ||
-                            (between.ValueKind != JsonValueKind.Undefined &&
-                             between.ValueKind == JsonValueKind.Array &&
-                             between.GetArrayLength() > 1))
-                        {
-                            relationshipChange.Character2 = character2.ValueKind != JsonValueKind.Undefined ?
-                                character2.GetString() ?? "" :
-                                between[1].GetString() ?? "";
-                        }
-
-                        if (change.TryGetProperty("change", out var changeDescription))
-                        {
-                            relationshipChange.Change = changeDescription.GetString() ?? "";
-                        }
-
-                        if (change.TryGetProperty("reason", out var reason))
-                        {
-                            relationshipChange.Reason = reason.GetString() ?? "";
-                        }
-
-                        interaction.RelationshipChanges.Add(relationshipChange);
-                    }
-                }
-
-                // Extract plot developments
-                if (jsonResponse.TryGetProperty("plot_developments", out var plotDevelopments) &&
-                    plotDevelopments.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var development in plotDevelopments.EnumerateArray())
-                    {
-                        if (development.ValueKind == JsonValueKind.String)
-                        {
-                            var plotElement = development.GetString() ?? "";
-                            if (!string.IsNullOrEmpty(plotElement))
-                            {
-                                interaction.PlotDevelopments.Add(plotElement);
-                                memory.PlotElements.Add(plotElement);
-                            }
-                        }
-                    }
-                }
-                else if (jsonResponse.TryGetProperty("story_tracking", out var storyTracking) &&
-                         storyTracking.TryGetProperty("plot_developments", out plotDevelopments) &&
-                         plotDevelopments.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var development in plotDevelopments.EnumerateArray())
-                    {
-                        if (development.ValueKind == JsonValueKind.String)
-                        {
-                            var plotElement = development.GetString() ?? "";
-                            if (!string.IsNullOrEmpty(plotElement))
-                            {
-                                interaction.PlotDevelopments.Add(plotElement);
-                                memory.PlotElements.Add(plotElement);
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to parse some JSON components, continuing with partial data");
-            }
-
-            // Store the structured interaction
-            memory.Interaction = interaction;
-
-            // Generate importance score based on character emotions and plot developments
-            memory.Importance = CalculateImportance(memory);
-
-            // Create a summary using the LLM for quick retrieval
-            memory.Summary = await GenerateSummaryAsync(memory);
-
-            // Generate embedding for the full content + summary
-            var contentToEmbed = $"{memory.Summary}\n{interaction.SceneDescription}\n" +
-                string.Join("\n", interaction.CharacterResponses.Select(cr =>
-                    $"{cr.CharacterName}: {cr.Dialogue} {cr.Action}").ToList());
-
-            memory.ContentEmbedding = await _embeddingService.GenerateEmbeddingAsync(contentToEmbed);
-
-            // Store in vector database
-            await _collection.UpsertAsync(memory);
-
-            _logger.LogInformation("Stored memory with key {Key}", memory.Key);
-
-            return memory.Key;
+            Task.Run(() => UpsertMemories(jsonResponse, playerAction));
         }
         catch (Exception ex)
         {
@@ -398,7 +194,7 @@ public class StoryService
     /// </summary>
     public async Task<string> BuildStoryPromptAsync(
         string playerAction,
-        string templateType = "basic")
+        string templateType = "advanced")
     {
         // Get relevant memories
         var relevantMemories = await RetrieveRelevantMemoriesAsync(playerAction);
@@ -420,7 +216,7 @@ public class StoryService
         };
 
         // Use a dummy vector for search when we just want to filter/sort
-        var dummyVector = new ReadOnlyMemory<float>(new float[384]);
+        var dummyVector = new ReadOnlyMemory<float>(new float[768]);
 
         // Get all memories
         var allMemoriesResponse = await _collection.VectorizedSearchAsync(dummyVector, memorySearchOptions);
@@ -447,13 +243,13 @@ public class StoryService
         switch (templateType.ToLower())
         {
             case "advanced":
-                template = GetAdvancedTemplate();
+                template = _promptRepository.Get("advanced");
                 break;
             case "vector":
-                template = GetVectorTemplate();
+                template = _promptRepository.Get("vector");
                 break;
             default:
-                template = GetBasicTemplate();
+                template = _promptRepository.Get("default");
                 break;
         }
 
@@ -527,28 +323,208 @@ public class StoryService
         }
     }
 
-    // Template getters
-    private string GetBasicTemplate()
+    private async Task UpsertMemories(JsonElement json, string playerAction)
     {
-        return _promptRepository.Get("default");
-    }
+        // Create a new memory instance
+        var memory = new StoryMemory
+        {
+            Key = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            MemoryType = "story_interaction",
+            Content = json.ToString(),
+            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        };
 
-    private string GetAdvancedTemplate()
-    {
-        // Return advanced template (abbreviated for brevity)
-        return @"You are an advanced narrative engine for an interactive story experience. Your task is to generate dynamic, character-driven responses based on relationships, history, and narrative context.
+        // Extract core information based on the JSON structure
+        var interaction = new StoryInteraction
+        {
+            PlayerAction = playerAction
+        };
 
-## WORLD INFORMATION
-Setting: {{story_setting}}
-..."; // Full template would be included here
-    }
+        try
+        {
+            // Try to extract scene description
+            if (json.TryGetProperty("scene_description", out var sceneDescription))
+            {
+                interaction.SceneDescription = sceneDescription.GetString() ?? "";
+            }
+            else if (json.TryGetProperty("scene", out var scene) &&
+                     scene.TryGetProperty("description", out var sceneDesc))
+            {
+                interaction.SceneDescription = sceneDesc.GetString() ?? "";
+            }
+            else if (json.TryGetProperty("narrative_response", out var narrativeResponse) &&
+                     narrativeResponse.TryGetProperty("scene_description", out var narrativeSceneDesc))
+            {
+                interaction.SceneDescription = narrativeSceneDesc.GetString() ?? "";
+            }
 
-    private string GetVectorTemplate()
-    {
-        // Return vector-aware template (abbreviated for brevity)
-        return @"You are an AI narrator managing an interactive story with vector-based memory retrieval. Your responses should be faithful to the provided context, especially the relevant memories retrieved from your vector database.
+            // Try to extract character responses
+            if (json.TryGetProperty("character_responses", out var characterResponses) &&
+                characterResponses.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var response in characterResponses.EnumerateArray())
+                {
+                    var characterResponse = new CharacterResponse();
 
-## STORY CONFIGURATION
-..."; // Full template would be included here
+                    if (response.TryGetProperty("character_name", out var characterName) ||
+                        response.TryGetProperty("character", out characterName))
+                    {
+                        characterResponse.CharacterName = characterName.GetString() ?? "";
+                    }
+
+                    if (response.TryGetProperty("dialogue", out var dialogue))
+                    {
+                        characterResponse.Dialogue = dialogue.GetString() ?? "";
+                    }
+
+                    if (response.TryGetProperty("action", out var action) ||
+                        response.TryGetProperty("actions", out action))
+                    {
+                        characterResponse.Action = action.GetString() ?? "";
+                    }
+
+                    if (response.TryGetProperty("emotion", out var emotion) ||
+                        response.TryGetProperty("emotional_state", out emotion))
+                    {
+                        characterResponse.Emotion = emotion.GetString() ?? "";
+                    }
+
+                    if (response.TryGetProperty("internal_thoughts", out var internalThoughts))
+                    {
+                        characterResponse.InternalThoughts = internalThoughts.GetString() ?? "";
+                    }
+
+                    interaction.CharacterResponses.Add(characterResponse);
+
+                    // Add to characters involved list
+                    if (!string.IsNullOrEmpty(characterResponse.CharacterName) &&
+                        !memory.CharactersInvolved.Contains(characterResponse.CharacterName))
+                    {
+                        memory.CharactersInvolved.Add(characterResponse.CharacterName);
+                    }
+                }
+            }
+
+            // Try to extract location
+            if (json.TryGetProperty("current_location", out var location))
+            {
+                interaction.Location = location.GetString() ?? "";
+                if (!string.IsNullOrEmpty(interaction.Location))
+                {
+                    memory.LocationsInvolved.Add(interaction.Location);
+                }
+            }
+
+            // Try to extract narrative progression
+            if (json.TryGetProperty("narrative_progression", out var narrativeProgression))
+            {
+                interaction.NarrativeProgression = narrativeProgression.GetString() ?? "";
+            }
+
+            // Try to extract relationship changes
+            if (json.TryGetProperty("relationship_changes", out var relationshipChanges) &&
+                relationshipChanges.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var change in relationshipChanges.EnumerateArray())
+                {
+                    var relationshipChange = new RelationshipChange();
+
+                    // Fix: Initialize between variable before use
+                    JsonElement between = default;
+
+                    if (change.TryGetProperty("character1", out var character1) ||
+                        (change.TryGetProperty("between", out between) &&
+                         between.ValueKind == JsonValueKind.Array &&
+                         between.GetArrayLength() > 0))
+                    {
+                        relationshipChange.Character1 = character1.ValueKind != JsonValueKind.Undefined ?
+                            character1.GetString() ?? "" :
+                            between[0].GetString() ?? "";
+                    }
+
+                    if (change.TryGetProperty("character2", out var character2) ||
+                        (between.ValueKind != JsonValueKind.Undefined &&
+                         between.ValueKind == JsonValueKind.Array &&
+                         between.GetArrayLength() > 1))
+                    {
+                        relationshipChange.Character2 = character2.ValueKind != JsonValueKind.Undefined ?
+                            character2.GetString() ?? "" :
+                            between[1].GetString() ?? "";
+                    }
+
+                    if (change.TryGetProperty("change", out var changeDescription))
+                    {
+                        relationshipChange.Change = changeDescription.GetString() ?? "";
+                    }
+
+                    if (change.TryGetProperty("reason", out var reason))
+                    {
+                        relationshipChange.Reason = reason.GetString() ?? "";
+                    }
+
+                    interaction.RelationshipChanges.Add(relationshipChange);
+                }
+            }
+
+            // Extract plot developments
+            if (json.TryGetProperty("plot_developments", out var plotDevelopments) &&
+                plotDevelopments.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var development in plotDevelopments.EnumerateArray())
+                {
+                    if (development.ValueKind == JsonValueKind.String)
+                    {
+                        var plotElement = development.GetString() ?? "";
+                        if (!string.IsNullOrEmpty(plotElement))
+                        {
+                            interaction.PlotDevelopments.Add(plotElement);
+                            memory.PlotElements.Add(plotElement);
+                        }
+                    }
+                }
+            }
+            else if (json.TryGetProperty("story_tracking", out var storyTracking) &&
+                     storyTracking.TryGetProperty("plot_developments", out plotDevelopments) &&
+                     plotDevelopments.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var development in plotDevelopments.EnumerateArray())
+                {
+                    if (development.ValueKind == JsonValueKind.String)
+                    {
+                        var plotElement = development.GetString() ?? "";
+                        if (!string.IsNullOrEmpty(plotElement))
+                        {
+                            interaction.PlotDevelopments.Add(plotElement);
+                            memory.PlotElements.Add(plotElement);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse some JSON components, continuing with partial data");
+        }
+
+        // Store the structured interaction
+        memory.Interaction = interaction;
+
+        // Generate importance score based on character emotions and plot developments
+        memory.Importance = CalculateImportance(memory);
+
+        // Create a summary using the LLM for quick retrieval
+        memory.Summary = await GenerateSummaryAsync(memory);
+
+        // Generate embedding for the full content + summary
+        var contentToEmbed = $"{memory.Summary}\n{interaction.SceneDescription}\n" +
+            string.Join("\n", interaction.CharacterResponses.Select(cr =>
+                $"{cr.CharacterName}: {cr.Dialogue} {cr.Action}").ToList());
+
+        memory.ContentEmbedding = await _embeddingService.GenerateEmbeddingAsync(contentToEmbed);
+
+        // Store in vector database
+        await _collection.UpsertAsync(memory);
+
+        _logger.LogInformation("Stored memory with key {Key}", memory.Key);
     }
 }
