@@ -7,6 +7,7 @@ using Roleplaying.Chatbot.Engine.Repositories;
 using Roleplaying.Chatbot.Engine.Services;
 
 namespace Roleplaying.Chatbot.Engine;
+
 /// <summary>
 /// Main application for the interactive story
 /// </summary>
@@ -53,16 +54,16 @@ public class InteractiveStoryApp
         // Main interaction loop
         while (true)
         {
-            Console.Write("\nWhat would you like to do? (type 'exit' to quit): ");
-            var playerAction = Console.ReadLine();
+            Console.Write("\nWhat would you like to say or do? (type 'exit' to quit): ");
+            var playerInput = Console.ReadLine();
 
-            if (string.IsNullOrEmpty(playerAction) || playerAction.ToLower() == "exit")
+            if (string.IsNullOrEmpty(playerInput) || playerInput.ToLower() == "exit")
             {
                 break;
             }
 
             // Build prompt with relevant context
-            var prompt = await _memoryService.BuildStoryPromptAsync(playerAction);
+            var prompt = await _memoryService.BuildStoryPromptAsync(playerInput);
 
             // Send to LLM for response
             var function = _kernel.CreateFunctionFromPrompt(prompt);
@@ -70,7 +71,7 @@ public class InteractiveStoryApp
             var responseJson = result.ToString();
 
             // Process and display the response
-            await ProcessAndDisplayResponse(responseJson, playerAction);
+            await ProcessAndDisplayResponse(responseJson, playerInput);
         }
 
         Console.WriteLine("\nThanks for playing!");
@@ -81,27 +82,28 @@ public class InteractiveStoryApp
     /// </summary>
     private async Task<string> CreateInitialSceneAsync()
     {
-        // Create a prompt for the initial scene
-        var initialPrompt = _promptRepository.Get("initial");
+        // Try to use the scenario-specific initial prompt if available
+        var initialPrompt =_promptRepository.Get("initial");
 
-        // Create character descriptions
-        var characterDescriptions = string.Join("\n", _storyConfig.Characters
-            .Where(c => !c.IsPlayerCharacter)
-            .Select(c => $"- {c.Name}: {c.Personality}"));
-
-        // Get player character
+        // Find player character
         var playerCharacter = _storyConfig.Characters.FirstOrDefault(c => c.IsPlayerCharacter);
         var playerDescription = playerCharacter != null
             ? $"{playerCharacter.Name}: {playerCharacter.Personality} - {playerCharacter.Background}"
-            : "Detective: A sharp-minded investigator with a keen eye for details.";
+            : "Player character information not available";
+
+        // Get NPC characters
+        var npcCharacters = string.Join("\n", _storyConfig.Characters
+            .Where(c => !c.IsPlayerCharacter)
+            .Select(c => $"- {c.Name}: {c.Personality} - {c.Background}"));
 
         // Create the function and invoke it
         var initialSceneFunction = _kernel.CreateFunctionFromPrompt(initialPrompt);
         var result = await _kernel.InvokeAsync(initialSceneFunction, new KernelArguments
         {
             ["setting"] = _storyConfig.Setting,
-            ["characters"] = characterDescriptions,
-            ["playerCharacter"] = playerDescription
+            ["scenario_description"] = _storyConfig.Title + ": " + _storyConfig.Setting,
+            ["player_character"] = playerDescription,
+            ["npc_characters"] = npcCharacters
         });
 
         return result.ToString();
@@ -110,14 +112,14 @@ public class InteractiveStoryApp
     /// <summary>
     /// Process and display the story response
     /// </summary>
-    private async Task ProcessAndDisplayResponse(string responseJson, string? playerAction = null)
+    private async Task ProcessAndDisplayResponse(string responseJson, string? playerInput = null)
     {
         try
         {
             // Store in the memory service
-            if (playerAction != null)
+            if (playerInput != null)
             {
-                await _memoryService.StoreInteractionAsync(playerAction, responseJson);
+                await _memoryService.StoreInteractionAsync(playerInput, responseJson);
             }
             else
             {
