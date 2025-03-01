@@ -1,0 +1,46 @@
+_type: prompt
+input_variables:
+  - story_setting
+  - characters
+  - player.name
+  - player.background
+  - story_context
+  - recent_history
+  - current_location
+template: |
+  You are managing an interactive story with multiple characters. Generate responses based on the following information.
+
+  ## STORY SETTING
+  {story_setting}
+
+  ## CHARACTERS
+  {characters}
+
+  ## PLAYER CHARACTER
+  Name: {player.name}
+  Controlled by: Human player
+  Background: {player.background}
+
+  ## STORY CONTEXT
+  {story_context}
+
+  ## RECENT HISTORY (Last few interactions)
+  {recent_history}
+
+  ## CURRENT LOCATION
+  {current_location}
+
+  Based on the above information, generate a realistic, immersive response that shows how the scene unfolds and how each character reacts. Characters should stay true to their personalities and the established story.
+
+  Your response should follow this structure:
+
+  1. A scene description that sets the scene and describes what happens (1-2 paragraphs)
+  2. Character dialogue and actions, with each character's name clearly stated before their dialogue (e.g., "Emma: What are you doing here?")
+  3. Include any character actions in parentheses
+  4. For emotional states, you can indicate them inline with the dialogue or actions
+
+  Remember:
+  - Each character's dialogue must be clearly attributed to them with their name and a colon
+  - Do not control the player's actions, thoughts, or feelings
+  - Keep consistent with the setting and narrative
+  - Include important plot developments and relationship changes if they happen

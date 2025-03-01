@@ -1,10 +1,8 @@
-﻿using System.Text.Json;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
-using Roleplaying.Chatbot.Engine.Helpers;
 using Roleplaying.Chatbot.Engine.Models;
-using Roleplaying.Chatbot.Engine.Repositories;
 using Roleplaying.Chatbot.Engine.Services;
+using Roleplaying.Chatbot.Engine.Settings;
 
 namespace Roleplaying.Chatbot.Engine;
 
@@ -15,41 +13,43 @@ public class InteractiveStoryApp
 {
     private readonly StoryService _memoryService;
     private readonly Kernel _kernel;
-    private readonly PromptRepository _promptRepository;
+    private readonly LangChainPromptService _promptService;
     private readonly ILogger<InteractiveStoryApp> _logger;
     private readonly StoryConfig _storyConfig;
     private readonly ChatHistoryService _chatHistoryService;
+    private readonly TextExtractionService _textExtractionService;
     private string _sessionId;
 
     public InteractiveStoryApp(
         StoryService memoryService,
         Kernel kernel,
-        PromptRepository promptRepository,
+        LangChainPromptService promptService,
         ChatHistoryService chatHistoryService,
+        TextExtractionService textExtractionService,
         ILogger<InteractiveStoryApp> logger,
         StoryConfig storyConfig)
     {
         _memoryService = memoryService;
         _kernel = kernel;
-        _promptRepository = promptRepository;
+        _promptService = promptService;
         _logger = logger;
         _storyConfig = storyConfig;
         _chatHistoryService = chatHistoryService;
+        _textExtractionService = textExtractionService;
         _sessionId = _chatHistoryService.CreateSession();
     }
 
     public async Task RunAsync()
     {
-        // Keep existing code
         _logger.LogInformation("Starting interactive story: {Title}", _storyConfig.Title);
-        // ...
 
         // Initial story setup - create first scene
+        Console.WriteLine(_storyConfig.Setting);
         Console.WriteLine("\n--- STORY BEGINS ---\n");
 
         // If this is first run, create an initial scene
-        var initialStoryJson = await CreateInitialSceneAsync();
-        await ProcessAndDisplayResponse(initialStoryJson);
+        var initialStoryResponse = await CreateInitialSceneAsync();
+        await ProcessAndDisplayResponse(initialStoryResponse);
 
         // Main interaction loop
         while (true)
@@ -70,11 +70,11 @@ public class InteractiveStoryApp
 
             // Send to LLM for response
             var function = _kernel.CreateFunctionFromPrompt(prompt);
-            var result = await _kernel.InvokeAsync(function);
-            var responseJson = result.ToString();
+            var result = await _kernel.InvokeAsync(function, new KernelArguments(PromptSettings.NormalChatSettings));
+            var responseText = result.ToString();
 
             // Process and display the response
-            await ProcessAndDisplayResponse(responseJson, playerInput);
+            await ProcessAndDisplayResponse(responseText, playerInput);
         }
 
         Console.WriteLine("\nThanks for playing!");
@@ -86,7 +86,7 @@ public class InteractiveStoryApp
     private async Task<string> CreateInitialSceneAsync()
     {
         // Try to use the scenario-specific initial prompt if available
-        var initialPrompt =_promptRepository.Get("initial");
+        var initialPrompt = _promptService.GetPromptTemplate("initial");
 
         // Find player character
         var playerCharacter = _storyConfig.Characters.FirstOrDefault(c => c.IsPlayerCharacter);
@@ -99,181 +99,151 @@ public class InteractiveStoryApp
             .Where(c => !c.IsPlayerCharacter)
             .Select(c => $"- {c.Name}: {c.Personality} - {c.Background}"));
 
-        // Create the function and invoke it
-        var initialSceneFunction = _kernel.CreateFunctionFromPrompt(initialPrompt);
-        var result = await _kernel.InvokeAsync(initialSceneFunction, new KernelArguments
+        // Format the prompt with required variables
+        var formattedPrompt = _promptService.FormatPrompt("initial", new Dictionary<string, string>
         {
-            ["setting"] = _storyConfig.Setting,
             ["scenario_description"] = _storyConfig.Title + ": " + _storyConfig.Setting,
+            ["setting"] = _storyConfig.Setting,
             ["player_character"] = playerDescription,
             ["npc_characters"] = npcCharacters
         });
 
+        // Create the function and invoke it
+        var initialSceneFunction = _kernel.CreateFunctionFromPrompt(formattedPrompt);
+        var result = await _kernel.InvokeAsync(initialSceneFunction, new KernelArguments(PromptSettings.NormalChatSettings));
+
         return result.ToString();
     }
 
-    private async Task ProcessAndDisplayResponse(string responseJson, string? playerInput = null)
+    private async Task ProcessAndDisplayResponse(string responseText, string? playerInput = null)
     {
         try
         {
-            await StoreInteractionInMemory(responseJson, playerInput);
+            // Extract structured information from text response
+            var storyInteraction = await _textExtractionService.ExtractStoryInteractionAsync(
+                responseText,
+                playerInput ?? "Begin the story");
 
-            var aiResponse = ResponseHelper.CleanJsonResponse(responseJson);
-            var response = JsonSerializer.Deserialize<JsonElement>(aiResponse);
+            _ = Task.Run(() => _memoryService.StoreInteractionAsync(storyInteraction.PlayerAction, responseText, storyInteraction));
 
-            // Create story interaction for building complete response
-            var storyInteraction = new StoryInteraction
+            // Display the scene description
+            if (!string.IsNullOrEmpty(storyInteraction.SceneDescription))
             {
-                PlayerAction = playerInput ?? "Begin the story",
-                CharacterResponses = new List<CharacterResponse>()
-            };
+                Console.WriteLine("\n" + storyInteraction.SceneDescription + "\n");
+            }
+            else
+            {
+                // If extraction failed, at least show the raw response
+                Console.WriteLine("\n" + responseText + "\n");
+            }
 
-            // Process and display each component
-            ExtractAndDisplaySceneDescription(response, storyInteraction);
-            ExtractAndDisplayCharacterResponses(response, storyInteraction);
+            // Display character responses
+            DisplayCharacterResponses(storyInteraction.CharacterResponses);
 
             // Add to chat history
             _chatHistoryService.AddAiMessage(_sessionId, storyInteraction);
 
-            DisplayAvailableActions(response);
+            // Try to find and display suggested actions
+            DisplaySuggestedActions(responseText);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing story response");
             Console.WriteLine("\nThere was an error processing the story response. Please try again.");
+
+            // Fall back to displaying the raw text
+            Console.WriteLine("\n" + responseText + "\n");
         }
     }
 
-    private async Task StoreInteractionInMemory(string responseJson, string? playerInput)
+    private void DisplayCharacterResponses(List<CharacterResponse> characterResponses)
     {
-        if (playerInput != null)
+        foreach (var response in characterResponses)
         {
-            await _memoryService.StoreInteractionAsync(playerInput, responseJson);
-        }
-        else
-        {
-            await _memoryService.StoreInteractionAsync("Begin the story", responseJson);
-        }
-    }
-
-    private void ExtractAndDisplaySceneDescription(JsonElement response, StoryInteraction storyInteraction)
-    {
-        string sceneDescription = "";
-
-        if (response.TryGetProperty("scene_description", out var sceneDescProperty))
-        {
-            sceneDescription = sceneDescProperty.GetString() ?? "";
-        }
-        else if (response.TryGetProperty("scene", out var scene) &&
-                 scene.TryGetProperty("description", out var sceneDesc))
-        {
-            sceneDescription = sceneDesc.GetString() ?? "";
-        }
-
-        storyInteraction.SceneDescription = sceneDescription;
-
-        if (!string.IsNullOrEmpty(sceneDescription))
-        {
-            Console.WriteLine("\n" + sceneDescription + "\n");
-        }
-    }
-
-    private void ExtractAndDisplayCharacterResponses(JsonElement response, StoryInteraction storyInteraction)
-    {
-        if (!response.TryGetProperty("character_responses", out var characterResponses) ||
-            characterResponses.ValueKind != JsonValueKind.Array)
-        {
-            return;
-        }
-
-        foreach (var charResponse in characterResponses.EnumerateArray())
-        {
-            var characterResponse = ExtractCharacterResponse(charResponse);
-            storyInteraction.CharacterResponses.Add(characterResponse);
-
-            DisplayCharacterResponse(characterResponse);
-        }
-    }
-
-    private CharacterResponse ExtractCharacterResponse(JsonElement charResponse)
-    {
-        var characterResponse = new CharacterResponse();
-
-        if (charResponse.TryGetProperty("character_name", out var name) ||
-            charResponse.TryGetProperty("character", out name))
-        {
-            characterResponse.CharacterName = name.GetString() ?? "";
-        }
-
-        if (charResponse.TryGetProperty("dialogue", out var dialogueProperty))
-        {
-            characterResponse.Dialogue = dialogueProperty.GetString() ?? "";
-        }
-
-        if (charResponse.TryGetProperty("action", out var actionProperty) ||
-            charResponse.TryGetProperty("actions", out actionProperty))
-        {
-            characterResponse.Action = actionProperty.GetString() ?? "";
-        }
-
-        if (charResponse.TryGetProperty("emotion", out var emotionProperty))
-        {
-            characterResponse.Emotion = emotionProperty.GetString() ?? "";
-        }
-
-        return characterResponse;
-    }
-
-    private void DisplayCharacterResponse(CharacterResponse characterResponse)
-    {
-        if (string.IsNullOrEmpty(characterResponse.CharacterName) ||
-            string.IsNullOrEmpty(characterResponse.Dialogue))
-        {
-            return;
-        }
-
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.Write($"{characterResponse.CharacterName}: ");
-        Console.ResetColor();
-        Console.WriteLine(characterResponse.Dialogue);
-
-        if (!string.IsNullOrEmpty(characterResponse.Action))
-        {
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine($"({characterResponse.Action})");
-            Console.ResetColor();
-        }
-
-        Console.WriteLine();
-    }
-
-    private void DisplayAvailableActions(JsonElement response)
-    {
-        JsonElement? availableActions = null;
-
-        if (response.TryGetProperty("available_actions", out var actions))
-        {
-            availableActions = actions;
-        }
-        else if (response.TryGetProperty("player_options", out var options) &&
-                options.TryGetProperty("suggested_actions", out actions))
-        {
-            availableActions = actions;
-        }
-
-        if (availableActions == null || availableActions.Value.ValueKind != JsonValueKind.Array)
-        {
-            return;
-        }
-
-        Console.WriteLine("\nSuggested actions:");
-        var i = 1;
-        foreach (var action in availableActions.Value.EnumerateArray())
-        {
-            if (action.ValueKind == JsonValueKind.String)
+            if (string.IsNullOrEmpty(response.CharacterName) ||
+                string.IsNullOrEmpty(response.Dialogue))
             {
-                Console.WriteLine($"{i}. {action.GetString()}");
-                i++;
+                continue;
+            }
+
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.Write($"{response.CharacterName}: ");
+            Console.ResetColor();
+            Console.WriteLine(response.Dialogue);
+
+            if (!string.IsNullOrEmpty(response.Action))
+            {
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine($"({response.Action})");
+                Console.ResetColor();
+            }
+
+            Console.WriteLine();
+        }
+    }
+
+    private void DisplaySuggestedActions(string responseText)
+    {
+        // Look for suggested actions at the end of the response
+        var lines = responseText.Split('\n');
+        var suggestedActions = new List<string>();
+        bool inSuggestions = false;
+
+        foreach (var line in lines.Reverse())
+        {
+            var trimmedLine = line.Trim();
+
+            // Look for typical suggestion markers
+            if (trimmedLine.Contains("suggest") ||
+                trimmedLine.Contains("you could") ||
+                trimmedLine.Contains("you might") ||
+                trimmedLine.StartsWith("1.") ||
+                trimmedLine.StartsWith("•") ||
+                trimmedLine.StartsWith("-"))
+            {
+                inSuggestions = true;
+
+                // Try to handle numbered or bulleted lists
+                if (trimmedLine.StartsWith("1.") ||
+                    trimmedLine.StartsWith("•") ||
+                    trimmedLine.StartsWith("-"))
+                {
+                    suggestedActions.Add(trimmedLine);
+                }
+                // If we find an introduction to suggestions, stop here
+                else if (trimmedLine.Contains("suggest") ||
+                         trimmedLine.Contains("you could") ||
+                         trimmedLine.Contains("you might"))
+                {
+                    break;
+                }
+            }
+            else if (inSuggestions &&
+                    (trimmedLine.StartsWith("2.") ||
+                     trimmedLine.StartsWith("3.") ||
+                     trimmedLine.StartsWith("4.")))
+            {
+                suggestedActions.Add(trimmedLine);
+            }
+            else if (inSuggestions && string.IsNullOrWhiteSpace(trimmedLine))
+            {
+                // Skip empty lines in the suggestion section
+                continue;
+            }
+            else if (inSuggestions)
+            {
+                // If we've seen suggestions but now hit something else, we're done
+                break;
+            }
+        }
+
+        // If we found suggestions, display them
+        if (suggestedActions.Count > 0)
+        {
+            Console.WriteLine("\nSuggested actions:");
+            foreach (var action in suggestedActions.AsEnumerable().Reverse())
+            {
+                Console.WriteLine(action);
             }
         }
     }

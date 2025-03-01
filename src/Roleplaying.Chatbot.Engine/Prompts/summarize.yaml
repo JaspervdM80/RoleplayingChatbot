@@ -1,0 +1,18 @@
+_type: prompt
+input_variables:
+  - playerAction
+  - sceneDescription
+  - characterResponses
+template: |
+  Create a concise summary (2-3 sentences) of the following story event:
+
+  PLAYER ACTION:
+  {playerAction}
+
+  SCENE DESCRIPTION:
+  {sceneDescription}
+
+  CHARACTER RESPONSES:
+  {characterResponses}
+
+  SUMMARY:

@@ -1,0 +1,32 @@
+_type: prompt
+input_variables:
+  - scenario_description
+  - setting
+  - player_character
+  - npc_characters
+template: |
+  You are creating the opening scene for an interactive story based on the following scenario:
+
+  ## STORY BACKGROUND
+  {scenario_description}
+
+  ## SETTING
+  {setting}
+
+  ## PLAYER CHARACTER
+  {player_character}
+
+  ## NPC CHARACTERS
+  {npc_characters}
+
+  Create an engaging opening scene that introduces the setting and characters. Follow this structure:
+
+  1. Begin with a detailed scene description (2-3 paragraphs) that establishes the setting and atmosphere
+  2. Include initial dialogue from each relevant NPC character, clearly attributed with their name (e.g., "Emma: Welcome to the party!")
+  3. Include character actions in parentheses after their dialogue or as separate descriptions
+  4. Mention the emotional state of characters when relevant
+
+  IMPORTANT GUIDELINES:
+  1. DO NOT control the player character's actions, thoughts, or dialogue
+  2. The scene should set up the scenario as described in the story background
+  3. NPC characters should act according to their defined personalities
