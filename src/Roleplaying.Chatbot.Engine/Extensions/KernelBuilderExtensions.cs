@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Embeddings;
+using Roleplaying.Chatbot.Engine.Abstractions;
 using Roleplaying.Chatbot.Engine.Services;
 
 namespace Roleplaying.Chatbot.Engine.Extensions;
@@ -48,7 +49,7 @@ public static class KernelBuilderExtensions
                     "../sleepover_scenario.json"
                 };
 
-                string scenarioPath = potentialPaths.FirstOrDefault(File.Exists)
+                var scenarioPath = potentialPaths.FirstOrDefault(File.Exists)
                     ?? throw new FileNotFoundException("Could not find scenario file");
 
                 logger.LogInformation("Loading scenario from {Path}", scenarioPath);
@@ -71,7 +72,7 @@ public static class KernelBuilderExtensions
     {
         services.AddSingleton(sp =>
         {
-            var logger = sp.GetRequiredService<ILogger<LangChainPromptService>>();
+            var logger = sp.GetRequiredService<ILoggingService>();
             var promptService = new LangChainPromptService(logger);
 
             // Load templates asynchronously 
@@ -88,10 +89,9 @@ public static class KernelBuilderExtensions
         var kernelBuilder = Kernel.CreateBuilder();
 
         // Configure your LLM service here
-        kernelBuilder.AddOpenAIChatCompletion(
+        kernelBuilder.AddOllamaChatCompletion(
             modelId: "phi3", // Use your preferred model
-            openAIClient: new OpenAI.OpenAIClient(new System.ClientModel.ApiKeyCredential("no-key"), new OpenAI.OpenAIClientOptions() { Endpoint = new Uri("http://localhost:11434/v1") })
-            );
+            httpClient: new HttpClient() { BaseAddress = new Uri("http://localhost:11434/v1") });
 
         // Configure embedding service - use an appropriate embedding model
         kernelBuilder.AddOllamaTextEmbeddingGeneration(

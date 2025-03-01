@@ -1,5 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
-using Microsoft.SemanticKernel;
+﻿using Microsoft.SemanticKernel;
+using Roleplaying.Chatbot.Engine.Abstractions;
 using Roleplaying.Chatbot.Engine.Models;
 using Roleplaying.Chatbot.Engine.Services;
 using Roleplaying.Chatbot.Engine.Settings;
@@ -14,11 +14,11 @@ public class InteractiveStoryApp
     private readonly StoryService _memoryService;
     private readonly Kernel _kernel;
     private readonly LangChainPromptService _promptService;
-    private readonly ILogger<InteractiveStoryApp> _logger;
     private readonly StoryConfig _storyConfig;
     private readonly ChatHistoryService _chatHistoryService;
     private readonly TextExtractionService _textExtractionService;
-    private string _sessionId;
+    private readonly ILoggingService _loggingService;
+    private readonly string _sessionId;
 
     public InteractiveStoryApp(
         StoryService memoryService,
@@ -26,28 +26,24 @@ public class InteractiveStoryApp
         LangChainPromptService promptService,
         ChatHistoryService chatHistoryService,
         TextExtractionService textExtractionService,
-        ILogger<InteractiveStoryApp> logger,
+        ILoggingService loggingService,
         StoryConfig storyConfig)
     {
         _memoryService = memoryService;
         _kernel = kernel;
         _promptService = promptService;
-        _logger = logger;
         _storyConfig = storyConfig;
         _chatHistoryService = chatHistoryService;
         _textExtractionService = textExtractionService;
+        _loggingService = loggingService;
         _sessionId = _chatHistoryService.CreateSession();
     }
 
     public async Task RunAsync()
     {
-        _logger.LogInformation("Starting interactive story: {Title}", _storyConfig.Title);
-
-        // Initial story setup - create first scene
+        Console.WriteLine($"Starting interactive story: {_storyConfig.Title}");
         Console.WriteLine(_storyConfig.Setting);
-        Console.WriteLine("\n--- STORY BEGINS ---\n");
 
-        // If this is first run, create an initial scene
         var initialStoryResponse = await CreateInitialSceneAsync();
         await ProcessAndDisplayResponse(initialStoryResponse);
 
@@ -65,19 +61,31 @@ public class InteractiveStoryApp
             // Add player input to chat history
             _chatHistoryService.AddUserMessage(_sessionId, playerInput);
 
-            // Build prompt with relevant context and chat history
-            var prompt = await _memoryService.BuildStoryPromptAsync(playerInput);
+            try
+            {
+                // Build prompt with relevant context and chat history
+                var prompt = await _memoryService.BuildStoryPromptAsync(playerInput);
 
-            // Send to LLM for response
-            var function = _kernel.CreateFunctionFromPrompt(prompt);
-            var result = await _kernel.InvokeAsync(function, new KernelArguments(PromptSettings.NormalChatSettings));
-            var responseText = result.ToString();
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-            // Process and display the response
-            await ProcessAndDisplayResponse(responseText, playerInput);
+                var function = _kernel.CreateFunctionFromPrompt(prompt);
+                var result = await _kernel.InvokeAsync(function, new KernelArguments(PromptSettings.NormalChatSettings));
+                var responseText = result.ToString();
+
+                stopwatch.Stop();
+
+                _ = _loggingService.LogLlmInteraction("main_story", prompt, responseText, stopwatch.Elapsed);
+
+                // Process and display the response
+                await ProcessAndDisplayResponse(responseText, playerInput);
+            }
+            catch (Exception ex)
+            {
+                await _loggingService.LogError("RunAsync_MainLoop", ex, new { PlayerInput = playerInput });
+
+                Console.WriteLine("\nAn error occurred. Please try again or check the logs.");
+            }
         }
-
-        Console.WriteLine("\nThanks for playing!");
     }
 
     /// <summary>
@@ -85,34 +93,50 @@ public class InteractiveStoryApp
     /// </summary>
     private async Task<string> CreateInitialSceneAsync()
     {
-        // Try to use the scenario-specific initial prompt if available
-        var initialPrompt = _promptService.GetPromptTemplate("initial");
-
-        // Find player character
-        var playerCharacter = _storyConfig.Characters.FirstOrDefault(c => c.IsPlayerCharacter);
-        var playerDescription = playerCharacter != null
-            ? $"{playerCharacter.Name}: {playerCharacter.Personality} - {playerCharacter.Background}"
-            : "Player character information not available";
-
-        // Get NPC characters
-        var npcCharacters = string.Join("\n", _storyConfig.Characters
-            .Where(c => !c.IsPlayerCharacter)
-            .Select(c => $"- {c.Name}: {c.Personality} - {c.Background}"));
-
-        // Format the prompt with required variables
-        var formattedPrompt = _promptService.FormatPrompt("initial", new Dictionary<string, string>
+        try
         {
-            ["scenario_description"] = _storyConfig.Title + ": " + _storyConfig.Setting,
-            ["setting"] = _storyConfig.Setting,
-            ["player_character"] = playerDescription,
-            ["npc_characters"] = npcCharacters
-        });
+            // Try to use the scenario-specific initial prompt if available
+            var initialPrompt = _promptService.GetPromptTemplate("initial");
 
-        // Create the function and invoke it
-        var initialSceneFunction = _kernel.CreateFunctionFromPrompt(formattedPrompt);
-        var result = await _kernel.InvokeAsync(initialSceneFunction, new KernelArguments(PromptSettings.NormalChatSettings));
+            // Find player character
+            var playerCharacter = _storyConfig.Characters.FirstOrDefault(c => c.IsPlayerCharacter);
+            var playerDescription = playerCharacter != null
+                ? $"{playerCharacter.Name}: {playerCharacter.Personality} - {playerCharacter.Background}"
+                : "Player character information not available";
 
-        return result.ToString();
+            // Get NPC characters
+            var npcCharacters = string.Join("\n", _storyConfig.Characters
+                .Where(c => !c.IsPlayerCharacter)
+                .Select(c => $"- {c.Name}: {c.Personality} - {c.Background}"));
+
+            // Format the prompt with required variables
+            var formattedPrompt = _promptService.FormatPrompt("initial", new Dictionary<string, string>
+            {
+                ["scenario_description"] = _storyConfig.Title + ": " + _storyConfig.Setting,
+                ["setting"] = _storyConfig.Setting,
+                ["player_character"] = playerDescription,
+                ["npc_characters"] = npcCharacters
+            });
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            // Create the function and invoke it
+            var initialSceneFunction = _kernel.CreateFunctionFromPrompt(formattedPrompt);
+            var result = await _kernel.InvokeAsync(initialSceneFunction, new KernelArguments(PromptSettings.NormalChatSettings));
+
+            var responseText = result.ToString();
+
+            stopwatch.Stop();
+
+            _ = _loggingService.LogLlmInteraction("initial_scene", formattedPrompt, responseText, stopwatch.Elapsed);
+
+            return responseText;
+        }
+        catch (Exception ex)
+        {
+            _ = _loggingService.LogError("CreateInitialScene", ex);
+            throw;
+        }
     }
 
     private async Task ProcessAndDisplayResponse(string responseText, string? playerInput = null)
@@ -124,7 +148,7 @@ public class InteractiveStoryApp
                 responseText,
                 playerInput ?? "Begin the story");
 
-            _ = Task.Run(() => _memoryService.StoreInteractionAsync(storyInteraction.PlayerAction, responseText, storyInteraction));
+            _ = _memoryService.StoreInteractionAsync(storyInteraction.PlayerAction, responseText, storyInteraction);
 
             // Display the scene description
             if (!string.IsNullOrEmpty(storyInteraction.SceneDescription))
@@ -148,11 +172,10 @@ public class InteractiveStoryApp
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing story response");
-            Console.WriteLine("\nThere was an error processing the story response. Please try again.");
+            _ = _loggingService.LogError("ProcessResponse", ex);
 
-            // Fall back to displaying the raw text
-            Console.WriteLine("\n" + responseText + "\n");
+            Console.WriteLine("\nThere was an error processing the story response. Please try again.");
+            Console.WriteLine($"\n{responseText}\n");
         }
     }
 
@@ -187,7 +210,7 @@ public class InteractiveStoryApp
         // Look for suggested actions at the end of the response
         var lines = responseText.Split('\n');
         var suggestedActions = new List<string>();
-        bool inSuggestions = false;
+        var inSuggestions = false;
 
         foreach (var line in lines.Reverse())
         {

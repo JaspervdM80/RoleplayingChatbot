@@ -2,7 +2,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Roleplaying.Chatbot.Engine.Models;
-using Roleplaying.Chatbot.Engine.Settings;
 
 namespace Roleplaying.Chatbot.Engine.Services;
 

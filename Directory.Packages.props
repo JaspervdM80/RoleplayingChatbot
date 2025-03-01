@@ -3,6 +3,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.KernelMemory.MemoryDb.Qdrant" Version="0.97.250211.1" />
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.39.0" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.Ollama" Version="1.39.0-alpha" />
     <PackageReference Include="Microsoft.SemanticKernel.Connectors.Qdrant" Version="1.39.0-preview" />
     <PackageReference Include="Microsoft.SemanticKernel.Core" Version="1.39.0" />
     <PackageReference Include="Microsoft.SemanticKernel.Plugins.Core" Version="1.39.0-alpha" />

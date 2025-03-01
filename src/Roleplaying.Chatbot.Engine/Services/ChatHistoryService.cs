@@ -82,7 +82,7 @@ public class ChatHistoryService
 
         foreach (var message in history)
         {
-            string prefix = message.Role == "user" ? "Player" : "AI";
+            var prefix = message.Role == "user" ? "Player" : "AI";
             builder.AppendLine($"[{prefix}]: {message.Content}");
             builder.AppendLine();
         }

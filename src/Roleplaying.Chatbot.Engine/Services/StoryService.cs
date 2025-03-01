@@ -1,9 +1,8 @@
-﻿using System.Text.Json;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.VectorData;
+﻿using Microsoft.Extensions.VectorData;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Connectors.Qdrant;
 using Microsoft.SemanticKernel.Embeddings;
+using Roleplaying.Chatbot.Engine.Abstractions;
 using Roleplaying.Chatbot.Engine.Models;
 using Roleplaying.Chatbot.Engine.Settings;
 
@@ -20,25 +19,18 @@ public class StoryService
     private readonly ITextEmbeddingGenerationService _embeddingService;
     private readonly StoryConfig _storyConfig;
     private readonly LangChainPromptService _langChainPromptService;
-    private readonly ILogger<StoryService> _logger;
-
-    // Vector dimension count from the embedding model
-    private const int EmbeddingDimensions = 768; 
+    private readonly ILoggingService _loggingService;
 
     /// <summary>
     /// Constructor initializes with required dependencies
     /// </summary>
-    public StoryService(
-    Kernel kernel,
-    StoryConfig storyConfig,
-    LangChainPromptService langChainPromptService,
-    ILogger<StoryService> logger)
+    public StoryService(Kernel kernel, StoryConfig storyConfig, LangChainPromptService langChainPromptService, ILoggingService loggingService)
     {
         _kernel = kernel;
         _embeddingService = _kernel.GetRequiredService<ITextEmbeddingGenerationService>();
         _storyConfig = storyConfig;
         _langChainPromptService = langChainPromptService;
-        _logger = logger;
+        _loggingService = loggingService;
 
         // Define vector store schema
         var memoryDefinition = new VectorStoreRecordDefinition
@@ -51,7 +43,7 @@ public class StoryService
             new VectorStoreRecordDataProperty("CharactersInvolved", typeof(List<string>)) { IsFilterable = true },
             new VectorStoreRecordDataProperty("LocationsInvolved", typeof(List<string>)) { IsFilterable = true },
             new VectorStoreRecordDataProperty("PlotElements", typeof(List<string>)) { IsFilterable = true },
-            new VectorStoreRecordVectorProperty("ContentEmbedding", typeof(ReadOnlyMemory<float>)) { Dimensions = EmbeddingDimensions },
+            new VectorStoreRecordVectorProperty("ContentEmbedding", typeof(ReadOnlyMemory<float>)) { Dimensions = Constants.EmbeddingDimensions },
             new VectorStoreRecordDataProperty("EmotionalValence", typeof(float)) { IsFilterable = true },
             new VectorStoreRecordDataProperty("Importance", typeof(float)) { IsFilterable = true },
             new VectorStoreRecordDataProperty("Summary", typeof(string)) { IsFullTextSearchable = true },
@@ -137,12 +129,10 @@ public class StoryService
 
             // Store in vector database
             await _collection.UpsertAsync(memory);
-
-            _logger.LogInformation("Stored memory with key {Key}", memory.Key);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to store story interaction");
+            _ = _loggingService.LogError("StoreInteraction", ex);
             throw;
         }
     }
@@ -150,11 +140,7 @@ public class StoryService
     /// <summary>
     /// Retrieves relevant story memories based on a query
     /// </summary>
-    public async Task<List<StoryMemory>> RetrieveRelevantMemoriesAsync(
-        string query,
-        List<string>? characterFilter = null,
-        string? locationFilter = null,
-        int limit = 5)
+    public async Task<List<StoryMemory>> RetrieveRelevantMemoriesAsync(string query, List<string>? characterFilter = null, string? locationFilter = null, int limit = 5)
     {
         try
         {
@@ -198,7 +184,7 @@ public class StoryService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to retrieve relevant memories");
+            _ = _loggingService.LogError("RetrieveRelevantMemories", ex);
             throw;
         }
     }
@@ -355,7 +341,7 @@ public class StoryService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate memory summary");
+            _ = _loggingService.LogError("GenerateSummary", ex);
 
             // Fallback summary if LLM fails
             return $"Interaction involving {string.Join(", ", memory.CharactersInvolved)} at {memory.Interaction.Location}.";

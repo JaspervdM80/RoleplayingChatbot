@@ -1,15 +1,15 @@
-﻿using Microsoft.Extensions.Logging;
-using YamlDotNet.Serialization;
+﻿using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 using System.Text.RegularExpressions;
+using Roleplaying.Chatbot.Engine.Abstractions;
 
 namespace Roleplaying.Chatbot.Engine.Services;
 
 public class LangChainPromptService
 {
-    private readonly ILogger<LangChainPromptService> _logger;
     private readonly Dictionary<string, LangChainPromptTemplate> _promptTemplates = [];
     private readonly IDeserializer _yamlDeserializer;
+    private readonly ILoggingService _loggingService;
 
     public class LangChainPromptTemplate
     {
@@ -18,13 +18,13 @@ public class LangChainPromptService
         public string Template { get; set; } = string.Empty;
     }
 
-    public LangChainPromptService(ILogger<LangChainPromptService> logger)
+    public LangChainPromptService(ILoggingService loggingService)
     {
-        _logger = logger;
         _yamlDeserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .IgnoreUnmatchedProperties()
             .Build();
+        _loggingService = loggingService;
     }
 
     public async Task InitializeTemplatesFromDirectory(string directory)
@@ -34,7 +34,7 @@ public class LangChainPromptService
             var dir = new DirectoryInfo(directory);
             if (!dir.Exists)
             {
-                _logger.LogWarning("Prompt directory {Directory} not found", directory);
+                _ = _loggingService.LogWarning($"Prompt directory {directory} not found");
                 return;
             }
 
@@ -61,24 +61,21 @@ public class LangChainPromptService
                             InputVariables = ExtractVariablesFromTemplate(templateContent)
                         };
                     }
-
-                    _logger.LogInformation("Loaded template: {TemplateName}", templateName);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error parsing template {TemplateName}", templateName);
+                    _ = _loggingService.LogError("InitiliazeTemplates", ex, new { TemplateName = templateName });
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error loading prompt templates");
+            _ = _loggingService.LogError("InitiliazeTemplates", ex);
         }
     }
 
     private List<string> ExtractVariablesFromTemplate(string template)
     {
-        // Extract handlebars-style variables like {{variable}} and {variable}
         var mustachePattern = new Regex(@"{{([^{}]+)}}");
         var bracePattern = new Regex(@"{([^{}]+)}");
 
@@ -110,7 +107,6 @@ public class LangChainPromptService
             return template.Template;
         }
 
-        _logger.LogWarning("Template {TemplateName} not found", name);
         throw new KeyNotFoundException($"Prompt template '{name}' not found");
     }
 
@@ -139,7 +135,7 @@ public class LangChainPromptService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error formatting prompt {TemplateName}", templateName);
+            _loggingService.LogError("FormatPrompt", ex, new { TemplateName = templateName });
             throw;
         }
     }

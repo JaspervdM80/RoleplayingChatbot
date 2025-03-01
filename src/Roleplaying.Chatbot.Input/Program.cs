@@ -1,12 +1,15 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Roleplaying.Chatbot.Engine;
+using Roleplaying.Chatbot.Engine.Abstractions;
 using Roleplaying.Chatbot.Engine.Extensions;
 using Roleplaying.Chatbot.Engine.Services;
 
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureServices((context, services) =>
     {
+        services.AddTransient<ILoggingService, LoggingService>();
+
         services.AddSemanticKernel();
         services.AddSingleton<ScenarioLoaderService>();
 
