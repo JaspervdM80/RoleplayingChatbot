@@ -1,0 +1,62 @@
+_type: prompt
+input_variables:
+  - story_setting
+  - characters
+  - player.name
+  - player.background
+  - story_context
+  - recent_history
+  - current_location
+  - player_action
+template: |
+  You are managing an interactive story with multiple characters. Generate responses based on the following information.
+
+  ## STORY SETTING
+  {story_setting}
+
+  ## CHARACTERS
+  {characters}
+
+  ## PLAYER CHARACTER
+  Name: {player.name}
+  Controlled by: Human player
+  Background: {player.background}
+
+  ## STORY CONTEXT
+  {story_context}
+
+  ## RECENT HISTORY (Last few interactions)
+  {recent_history}
+
+  ## CURRENT LOCATION
+  {current_location}
+
+  ## PLAYER INPUT
+  {player_action}
+
+  ## IMPORTANT NOTES
+  - NEVER specify the player's actions, thoughts, or dialogue - only respond with NPC reactions
+  - Describe the scene and NPC reactions to the player's input
+  - Keep characters true to their established personalities
+  - Allow the player complete freedom to decide what they say, feel, or do
+
+  Based on the above information, generate a realistic, immersive response that shows how each character would react to the player's input. Return your response as a JSON object with the following structure:
+
+  {
+    "scene_description": "A detailed description of what happens in this scene (1-2 paragraphs)",
+    "character_responses": [
+      {
+        "character_name": "Name of character 1",
+        "dialogue": "What character 1 says in response to the player",
+        "action": "What character 1 does (optional)",
+        "emotion": "Current emotional state"
+      },
+      {
+        "character_name": "Name of character 2",
+        "dialogue": "What character 2 says in response to the player",
+        "action": "What character 2 does (optional)",
+        "emotion": "Current emotional state"
+      }
+    ],
+    "narrative_progression": "Brief description of how the story has progressed"
+  }

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Roleplaying.Chatbot.Engine;
 using Roleplaying.Chatbot.Engine.Extensions;
@@ -49,6 +50,18 @@ var host = Host.CreateDefaultBuilder(args)
 
         // Register interactive story app
         services.AddSingleton<InteractiveStoryApp>();
+        services.AddSingleton<ChatHistoryService>();
+
+        // Initialize the LangChainPromptService
+        services.AddSingleton(sp =>
+        {
+            var logger = sp.GetRequiredService<ILogger<LangChainPromptService>>();
+            var promptService = new LangChainPromptService(logger);
+
+            // Load templates asynchronously 
+            promptService.InitializeTemplatesFromDirectory("./Prompts").GetAwaiter().GetResult();
+            return promptService;
+        });
     })
     .Build();
 

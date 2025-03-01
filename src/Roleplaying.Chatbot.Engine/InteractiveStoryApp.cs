@@ -18,11 +18,14 @@ public class InteractiveStoryApp
     private readonly PromptRepository _promptRepository;
     private readonly ILogger<InteractiveStoryApp> _logger;
     private readonly StoryConfig _storyConfig;
+    private readonly ChatHistoryService _chatHistoryService;
+    private string _sessionId;
 
     public InteractiveStoryApp(
         StoryService memoryService,
         Kernel kernel,
         PromptRepository promptRepository,
+        ChatHistoryService chatHistoryService,
         ILogger<InteractiveStoryApp> logger,
         StoryConfig storyConfig)
     {
@@ -31,18 +34,15 @@ public class InteractiveStoryApp
         _promptRepository = promptRepository;
         _logger = logger;
         _storyConfig = storyConfig;
+        _chatHistoryService = chatHistoryService;
+        _sessionId = _chatHistoryService.CreateSession();
     }
 
     public async Task RunAsync()
     {
+        // Keep existing code
         _logger.LogInformation("Starting interactive story: {Title}", _storyConfig.Title);
-        Console.WriteLine($"\nWelcome to {_storyConfig.Title}!");
-        Console.WriteLine($"Setting: {_storyConfig.Setting}");
-        Console.WriteLine("\nCharacters:");
-        foreach (var character in _storyConfig.Characters)
-        {
-            Console.WriteLine($"- {character.Name}: {character.Personality}");
-        }
+        // ...
 
         // Initial story setup - create first scene
         Console.WriteLine("\n--- STORY BEGINS ---\n");
@@ -62,7 +62,10 @@ public class InteractiveStoryApp
                 break;
             }
 
-            // Build prompt with relevant context
+            // Add player input to chat history
+            _chatHistoryService.AddUserMessage(_sessionId, playerInput);
+
+            // Build prompt with relevant context and chat history
             var prompt = await _memoryService.BuildStoryPromptAsync(playerInput);
 
             // Send to LLM for response
@@ -109,127 +112,169 @@ public class InteractiveStoryApp
         return result.ToString();
     }
 
-    /// <summary>
-    /// Process and display the story response
-    /// </summary>
     private async Task ProcessAndDisplayResponse(string responseJson, string? playerInput = null)
     {
         try
         {
-            // Store in the memory service
-            if (playerInput != null)
-            {
-                await _memoryService.StoreInteractionAsync(playerInput, responseJson);
-            }
-            else
-            {
-                // For initial scene, use a placeholder player action
-                await _memoryService.StoreInteractionAsync("Begin the story", responseJson);
-            }
+            await StoreInteractionInMemory(responseJson, playerInput);
 
             var aiResponse = ResponseHelper.CleanJsonResponse(responseJson);
-
-            // Parse the JSON
             var response = JsonSerializer.Deserialize<JsonElement>(aiResponse);
 
-            // Extract and display scene description
-            var sceneDescription = "";
-            if (response.TryGetProperty("scene_description", out var sceneDescProperty))
+            // Create story interaction for building complete response
+            var storyInteraction = new StoryInteraction
             {
-                sceneDescription = sceneDescProperty.GetString() ?? "";
-            }
-            else if (response.TryGetProperty("scene", out var scene) &&
-                     scene.TryGetProperty("description", out var sceneDesc))
-            {
-                sceneDescription = sceneDesc.GetString() ?? "";
-            }
+                PlayerAction = playerInput ?? "Begin the story",
+                CharacterResponses = new List<CharacterResponse>()
+            };
 
-            if (!string.IsNullOrEmpty(sceneDescription))
-            {
-                Console.WriteLine("\n" + sceneDescription + "\n");
-            }
+            // Process and display each component
+            ExtractAndDisplaySceneDescription(response, storyInteraction);
+            ExtractAndDisplayCharacterResponses(response, storyInteraction);
 
-            // Extract and display character responses
-            if (response.TryGetProperty("character_responses", out var characterResponses) &&
-                characterResponses.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var charResponse in characterResponses.EnumerateArray())
-                {
-                    var characterName = "";
-                    var dialogue = "";
-                    var action = "";
+            // Add to chat history
+            _chatHistoryService.AddAiMessage(_sessionId, storyInteraction);
 
-                    if (charResponse.TryGetProperty("character_name", out var name) ||
-                        charResponse.TryGetProperty("character", out name))
-                    {
-                        characterName = name.GetString() ?? "";
-                    }
-
-                    if (charResponse.TryGetProperty("dialogue", out var dialogueProperty))
-                    {
-                        dialogue = dialogueProperty.GetString() ?? "";
-                    }
-
-                    if (charResponse.TryGetProperty("action", out var actionProperty) ||
-                        charResponse.TryGetProperty("actions", out actionProperty))
-                    {
-                        action = actionProperty.GetString() ?? "";
-                    }
-
-                    if (!string.IsNullOrEmpty(characterName) && !string.IsNullOrEmpty(dialogue))
-                    {
-                        Console.ForegroundColor = ConsoleColor.Yellow;
-                        Console.Write($"{characterName}: ");
-                        Console.ResetColor();
-                        Console.WriteLine(dialogue);
-
-                        if (!string.IsNullOrEmpty(action))
-                        {
-                            Console.ForegroundColor = ConsoleColor.DarkGray;
-                            Console.WriteLine($"({action})");
-                            Console.ResetColor();
-                        }
-
-                        Console.WriteLine();
-                    }
-                }
-            }
-
-            // Display available actions if present
-            if (response.TryGetProperty("available_actions", out var availableActions) &&
-                availableActions.ValueKind == JsonValueKind.Array)
-            {
-                Console.WriteLine("\nSuggested actions:");
-                var i = 1;
-                foreach (var action in availableActions.EnumerateArray())
-                {
-                    if (action.ValueKind == JsonValueKind.String)
-                    {
-                        Console.WriteLine($"{i}. {action.GetString()}");
-                        i++;
-                    }
-                }
-            }
-            else if (response.TryGetProperty("player_options", out var playerOptions) &&
-                     playerOptions.TryGetProperty("suggested_actions", out availableActions) &&
-                     availableActions.ValueKind == JsonValueKind.Array)
-            {
-                Console.WriteLine("\nSuggested actions:");
-                var i = 1;
-                foreach (var action in availableActions.EnumerateArray())
-                {
-                    if (action.ValueKind == JsonValueKind.String)
-                    {
-                        Console.WriteLine($"{i}. {action.GetString()}");
-                        i++;
-                    }
-                }
-            }
+            DisplayAvailableActions(response);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing story response");
             Console.WriteLine("\nThere was an error processing the story response. Please try again.");
+        }
+    }
+
+    private async Task StoreInteractionInMemory(string responseJson, string? playerInput)
+    {
+        if (playerInput != null)
+        {
+            await _memoryService.StoreInteractionAsync(playerInput, responseJson);
+        }
+        else
+        {
+            await _memoryService.StoreInteractionAsync("Begin the story", responseJson);
+        }
+    }
+
+    private void ExtractAndDisplaySceneDescription(JsonElement response, StoryInteraction storyInteraction)
+    {
+        string sceneDescription = "";
+
+        if (response.TryGetProperty("scene_description", out var sceneDescProperty))
+        {
+            sceneDescription = sceneDescProperty.GetString() ?? "";
+        }
+        else if (response.TryGetProperty("scene", out var scene) &&
+                 scene.TryGetProperty("description", out var sceneDesc))
+        {
+            sceneDescription = sceneDesc.GetString() ?? "";
+        }
+
+        storyInteraction.SceneDescription = sceneDescription;
+
+        if (!string.IsNullOrEmpty(sceneDescription))
+        {
+            Console.WriteLine("\n" + sceneDescription + "\n");
+        }
+    }
+
+    private void ExtractAndDisplayCharacterResponses(JsonElement response, StoryInteraction storyInteraction)
+    {
+        if (!response.TryGetProperty("character_responses", out var characterResponses) ||
+            characterResponses.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var charResponse in characterResponses.EnumerateArray())
+        {
+            var characterResponse = ExtractCharacterResponse(charResponse);
+            storyInteraction.CharacterResponses.Add(characterResponse);
+
+            DisplayCharacterResponse(characterResponse);
+        }
+    }
+
+    private CharacterResponse ExtractCharacterResponse(JsonElement charResponse)
+    {
+        var characterResponse = new CharacterResponse();
+
+        if (charResponse.TryGetProperty("character_name", out var name) ||
+            charResponse.TryGetProperty("character", out name))
+        {
+            characterResponse.CharacterName = name.GetString() ?? "";
+        }
+
+        if (charResponse.TryGetProperty("dialogue", out var dialogueProperty))
+        {
+            characterResponse.Dialogue = dialogueProperty.GetString() ?? "";
+        }
+
+        if (charResponse.TryGetProperty("action", out var actionProperty) ||
+            charResponse.TryGetProperty("actions", out actionProperty))
+        {
+            characterResponse.Action = actionProperty.GetString() ?? "";
+        }
+
+        if (charResponse.TryGetProperty("emotion", out var emotionProperty))
+        {
+            characterResponse.Emotion = emotionProperty.GetString() ?? "";
+        }
+
+        return characterResponse;
+    }
+
+    private void DisplayCharacterResponse(CharacterResponse characterResponse)
+    {
+        if (string.IsNullOrEmpty(characterResponse.CharacterName) ||
+            string.IsNullOrEmpty(characterResponse.Dialogue))
+        {
+            return;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.Write($"{characterResponse.CharacterName}: ");
+        Console.ResetColor();
+        Console.WriteLine(characterResponse.Dialogue);
+
+        if (!string.IsNullOrEmpty(characterResponse.Action))
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"({characterResponse.Action})");
+            Console.ResetColor();
+        }
+
+        Console.WriteLine();
+    }
+
+    private void DisplayAvailableActions(JsonElement response)
+    {
+        JsonElement? availableActions = null;
+
+        if (response.TryGetProperty("available_actions", out var actions))
+        {
+            availableActions = actions;
+        }
+        else if (response.TryGetProperty("player_options", out var options) &&
+                options.TryGetProperty("suggested_actions", out actions))
+        {
+            availableActions = actions;
+        }
+
+        if (availableActions == null || availableActions.Value.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        Console.WriteLine("\nSuggested actions:");
+        var i = 1;
+        foreach (var action in availableActions.Value.EnumerateArray())
+        {
+            if (action.ValueKind == JsonValueKind.String)
+            {
+                Console.WriteLine($"{i}. {action.GetString()}");
+                i++;
+            }
         }
     }
 }

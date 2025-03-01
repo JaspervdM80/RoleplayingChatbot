@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using LangChain.Schema;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.VectorData;
 using Microsoft.SemanticKernel;
@@ -7,6 +8,7 @@ using Microsoft.SemanticKernel.Embeddings;
 using Roleplaying.Chatbot.Engine.Helpers;
 using Roleplaying.Chatbot.Engine.Models;
 using Roleplaying.Chatbot.Engine.Repositories;
+using YamlDotNet.Serialization.NodeDeserializers;
 
 namespace Roleplaying.Chatbot.Engine.Services;
 
@@ -21,6 +23,7 @@ public class StoryService
     private readonly ITextEmbeddingGenerationService _embeddingService;
     private readonly StoryConfig _storyConfig;
     private readonly PromptRepository _promptRepository;
+    private readonly LangChainPromptService _langChainPromptService;
     private readonly ILogger<StoryService> _logger;
 
     // Vector dimension count from the embedding model
@@ -33,13 +36,16 @@ public class StoryService
         Kernel kernel,
         StoryConfig storyConfig,
         PromptRepository promptRepository,
+        LangChainPromptService langChainPromptService,
         ILogger<StoryService> logger)
     {
         _kernel = kernel;
         _embeddingService = _kernel.GetRequiredService<ITextEmbeddingGenerationService>();
         _storyConfig = storyConfig;
         _promptRepository = promptRepository;
+        _langChainPromptService = langChainPromptService;
         _logger = logger;
+
 
         // Define vector store schema
         var memoryDefinition = new VectorStoreRecordDefinition
@@ -193,10 +199,10 @@ public class StoryService
     /// Builds a complete prompt for the story continuation
     /// </summary>
     public async Task<string> BuildStoryPromptAsync(
-        string playerAction,
-        string templateType = "advanced")
+    string playerAction,
+    string templateType = "advanced")
     {
-        // Get relevant memories
+        // Keep existing code to get relevantMemories
         var relevantMemories = await RetrieveRelevantMemoriesAsync(playerAction);
 
         // Get character data from story config
@@ -238,35 +244,20 @@ public class StoryService
         // Get current location
         var currentLocation = recentMemories.LastOrDefault()?.Interaction.Location ?? _storyConfig.Setting;
 
-        // Choose the appropriate template
-        string template;
-        switch (templateType.ToLower())
+        // Use LangChain for prompt formatting if available       
+        var variables = new Dictionary<string, string>
         {
-            case "advanced":
-                template = _promptRepository.Get("advanced");
-                break;
-            case "vector":
-                template = _promptRepository.Get("vector");
-                break;
-            default:
-                template = _promptRepository.Get("default");
-                break;
-        }
+            ["story_setting"] = _storyConfig.Setting,
+            ["characters"] = string.Join("\n", charactersData),
+            ["player.name"] = playerCharacter?.Name ?? "Player",
+            ["player.background"] = playerCharacter?.Background ?? "",
+            ["story_context"] = FormatMemoriesForPrompt(relevantMemories),
+            ["recent_history"] = recentHistory,
+            ["current_location"] = currentLocation,
+            ["player_action"] = playerAction
+        };
 
-        // Replace placeholders in the template
-        var prompt = template
-            .Replace("{{story_setting}}", _storyConfig.Setting)
-            .Replace("{{#each characters}}", "")
-            .Replace("{{/each}}", "")
-            .Replace("* {{name}}: {{personality}}", string.Join("\n", charactersData))
-            .Replace("{{player.name}}", playerCharacter?.Name ?? "Player")
-            .Replace("{{player.background}}", playerCharacter?.Background ?? "")
-            .Replace("{{story_context}}", FormatMemoriesForPrompt(relevantMemories))
-            .Replace("{{recent_history}}", recentHistory)
-            .Replace("{{current_location}}", currentLocation)
-            .Replace("{{player_action}}", playerAction);
-
-        return prompt;
+        return _langChainPromptService.FormatPrompt(templateType, variables);
     }
 
     /// <summary>
